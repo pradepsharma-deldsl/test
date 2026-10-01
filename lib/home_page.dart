@@ -38,7 +38,7 @@ class HomePage extends StatelessWidget {
             ),
             const SizedBox(height: 20),
             _ModuleCard(
-              icon: Icons.folder_lock_outlined,
+              icon: Icons.folder_outlined,
               title: 'Document Vault',
               subtitle: 'Store, search, edit, share and back up encrypted documents.',
               onTap: () => Navigator.push(
