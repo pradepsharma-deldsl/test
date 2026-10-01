@@ -1,4 +1,8 @@
 import 'dart:async';
+import 'dart:io';
+
+import 'package:path/path.dart' as p;
+import 'package:path_provider/path_provider.dart';
 
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
@@ -147,18 +151,21 @@ class _DocumentVaultPageState extends State<DocumentVaultPage> {
   int index = 0;
   int refreshToken = 0;
 
-  void _changed() => setState(() => refreshToken++);
+  void _changed({int? goTo}) {
+    if (!mounted) return;
+    setState(() {
+      refreshToken++;
+      if (goTo != null) index = goTo;
+    });
+  }
 
   @override
   Widget build(BuildContext context) {
     final pages = [
-      DocumentsPage(key: ValueKey('docs-$refreshToken'), onChanged: _changed),
-      AddDocumentPage(key: ValueKey('add-$refreshToken'), onSaved: () {
-        _changed();
-        setState(() => index = 0);
-      }),
-      DocumentTypesPage(key: ValueKey('types-$refreshToken'), onChanged: _changed),
-      SettingsPage(onDataChanged: _changed, onLock: widget.onLock),
+      DocumentsPage(refreshToken: refreshToken, onChanged: () => _changed()),
+      AddDocumentPage(refreshToken: refreshToken, onSaved: () => _changed(goTo: 0)),
+      DocumentTypesPage(refreshToken: refreshToken, onChanged: () => _changed()),
+      SettingsPage(onDataChanged: () => _changed(), onLock: widget.onLock),
     ];
     final titles = ['Documents', 'Add Document', 'Document Types', 'Settings'];
     return Scaffold(
@@ -189,7 +196,8 @@ class _DocumentVaultPageState extends State<DocumentVaultPage> {
 
 class AddDocumentPage extends StatefulWidget {
   final VoidCallback onSaved;
-  const AddDocumentPage({super.key, required this.onSaved});
+  final int refreshToken;
+  const AddDocumentPage({super.key, required this.onSaved, this.refreshToken = 0});
 
   @override
   State<AddDocumentPage> createState() => _AddDocumentPageState();
@@ -215,6 +223,14 @@ class _AddDocumentPageState extends State<AddDocumentPage> {
   void dispose() {
     owner.dispose();
     super.dispose();
+  }
+
+  @override
+  void didUpdateWidget(covariant AddDocumentPage oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.refreshToken != widget.refreshToken) {
+      loadTypes();
+    }
   }
 
 
@@ -484,7 +500,8 @@ class _AddDocumentPageState extends State<AddDocumentPage> {
 
 class DocumentTypesPage extends StatefulWidget {
   final VoidCallback onChanged;
-  const DocumentTypesPage({super.key, required this.onChanged});
+  final int refreshToken;
+  const DocumentTypesPage({super.key, required this.onChanged, this.refreshToken = 0});
 
   @override
   State<DocumentTypesPage> createState() => _DocumentTypesPageState();
@@ -511,6 +528,14 @@ class _DocumentTypesPageState extends State<DocumentTypesPage> {
   void dispose() {
     search.dispose();
     super.dispose();
+  }
+
+  @override
+  void didUpdateWidget(covariant DocumentTypesPage oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.refreshToken != widget.refreshToken) {
+      load();
+    }
   }
 
   Future<void> load() async {
@@ -635,7 +660,8 @@ class _DocumentTypesPageState extends State<DocumentTypesPage> {
 
 class DocumentsPage extends StatefulWidget {
   final VoidCallback onChanged;
-  const DocumentsPage({super.key, required this.onChanged});
+  final int refreshToken;
+  const DocumentsPage({super.key, required this.onChanged, this.refreshToken = 0});
 
   @override
   State<DocumentsPage> createState() => _DocumentsPageState();
@@ -660,6 +686,14 @@ class _DocumentsPageState extends State<DocumentsPage> {
     _searchDebounce?.cancel();
     search.dispose();
     super.dispose();
+  }
+
+  @override
+  void didUpdateWidget(covariant DocumentsPage oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.refreshToken != widget.refreshToken) {
+      load();
+    }
   }
 
   void _onSearchChanged(String _) {
@@ -811,10 +845,11 @@ class _DocumentDetailPageState extends State<DocumentDetailPage> {
       final safeName = (image.fileName == null || image.fileName!.trim().isEmpty)
           ? '${document.referenceNo}-picture-${image.order}.jpg'
           : image.fileName!;
-      await Share.shareXFiles(
-        [XFile.fromData(image.bytes, mimeType: image.mimeType ?? 'image/jpeg', name: safeName)],
+      await _shareImageFile(
+        bytes: image.bytes,
+        fileName: safeName,
+        mimeType: image.mimeType,
         text: '${document.documentType} • ${document.ownerName} • ${document.referenceNo}',
-        subject: 'Secure Docs picture',
       );
     } catch (e) {
       if (!mounted) return;
@@ -1116,8 +1151,10 @@ class _EditDocumentPageState extends State<EditDocumentPage> {
                           final safeName = (image.fileName == null || image.fileName!.trim().isEmpty)
                               ? '${d.referenceNo}-picture-${image.order}.jpg'
                               : image.fileName!;
-                          await Share.shareXFiles(
-                            [XFile.fromData(image.bytes, mimeType: image.mimeType ?? 'image/jpeg', name: safeName)],
+                          await _shareImageFile(
+                            bytes: image.bytes,
+                            fileName: safeName,
+                            mimeType: image.mimeType,
                             text: '${d.documentType} • ${d.ownerName} • ${d.referenceNo}',
                           );
                         } catch (e) {
@@ -1170,13 +1207,11 @@ class _ImageViewerPageState extends State<ImageViewerPage> {
             onPressed: () async {
               final image = widget.images[index];
               try {
-                await Share.shareXFiles([
-                  XFile.fromData(
-                    image.bytes,
-                    mimeType: image.mimeType ?? 'image/jpeg',
-                    name: image.fileName ?? 'secure-doc-picture-${image.order}.jpg',
-                  ),
-                ]);
+                await _shareImageFile(
+                  bytes: image.bytes,
+                  fileName: image.fileName ?? 'secure-doc-picture-${image.order}.jpg',
+                  mimeType: image.mimeType,
+                );
               } catch (e) {
                 if (!context.mounted) return;
                 ScaffoldMessenger.of(context).showSnackBar(
@@ -1339,11 +1374,13 @@ class _SettingsPageState extends State<SettingsPage> {
     setState(() => busy = true);
     try {
       final file = await AppDatabase.instance.createEncryptedBackup(password);
+      final shareFile = await _copyFileForSharing(file, preferredName: p.basename(file.path));
       await Share.shareXFiles(
-        [XFile(file.path)],
-        text: 'Secure Docs encrypted backup. Save this file to Gmail, Google Drive, OneDrive, Dropbox, or another trusted location. Keep the backup password separately.',
+        [XFile(shareFile.path, mimeType: 'application/octet-stream')],
+        subject: 'Secure Docs encrypted backup',
+        text: 'Encrypted Secure Docs backup. Save this .sdbak file to Gmail, Google Drive, OneDrive, Dropbox, Files, or another trusted location. Keep the backup password separately.',
       );
-      _msg('Encrypted backup created. Choose Gmail, Drive, or another app in the share sheet.');
+      _msg('Backup created. Choose Gmail, Drive, Files, or another app from Android Share.');
     } catch (e) {
       _msg('Backup failed: ${_cleanError(e)}');
     } finally {
@@ -1353,12 +1390,34 @@ class _SettingsPageState extends State<SettingsPage> {
 
   Future<void> _restore() async {
     final picked = await FilePicker.platform.pickFiles(
-      type: FileType.custom,
-      allowedExtensions: ['sdbak'],
+      type: FileType.any,
       allowMultiple: false,
+      withReadStream: true,
     );
-    final path = picked?.files.single.path;
-    if (path == null) return;
+    if (picked == null || picked.files.isEmpty) return;
+    final selected = picked.files.single;
+    String? path;
+    if (selected.path != null && selected.path!.isNotEmpty) {
+      path = selected.path;
+    } else if (selected.readStream != null) {
+      final temp = await getTemporaryDirectory();
+      final name = selected.name.trim().isEmpty ? 'imported-backup.sdbak' : selected.name;
+      final target = File(p.join(temp.path, _safeFileName(name, fallback: 'imported-backup.sdbak')));
+      final sink = target.openWrite();
+      try {
+        await for (final chunk in selected.readStream!) {
+          sink.add(chunk);
+        }
+        await sink.flush();
+      } finally {
+        await sink.close();
+      }
+      path = target.path;
+    }
+    if (path == null || path.isEmpty) {
+      _msg('The selected backup could not be opened. Download it locally and try again.');
+      return;
+    }
     final password = await _requestBackupPassword(confirm: false);
     if (password == null || !mounted) return;
     final yes = await _confirmDialog(
@@ -1511,14 +1570,14 @@ Future<int?> _pickDocumentType(
   List<DocumentType> types,
   int? selectedId,
 ) async {
-  final search = TextEditingController();
-  final result = await showModalBottomSheet<int>(
+  var query = '';
+  return showModalBottomSheet<int>(
     context: context,
     isScrollControlled: true,
     showDragHandle: true,
     builder: (sheetContext) => StatefulBuilder(
       builder: (context, setSheetState) {
-        final q = search.text.trim().toLowerCase();
+        final q = query.trim().toLowerCase();
         final filtered = q.isEmpty
             ? types
             : types.where((t) => t.name.toLowerCase().contains(q)).toList();
@@ -1536,16 +1595,10 @@ Future<int?> _pickDocumentType(
                   Text('Choose Document Type', style: Theme.of(context).textTheme.titleLarge),
                   const SizedBox(height: 12),
                   TextField(
-                    controller: search,
-                    autofocus: true,
-                    onChanged: (_) => setSheetState(() {}),
-                    decoration: InputDecoration(
+                    onChanged: (value) => setSheetState(() => query = value),
+                    decoration: const InputDecoration(
                       hintText: 'Search document type',
-                      prefixIcon: const Icon(Icons.search),
-                      suffixIcon: search.text.isEmpty ? null : IconButton(
-                        onPressed: () { search.clear(); setSheetState(() {}); },
-                        icon: const Icon(Icons.clear),
-                      ),
+                      prefixIcon: Icon(Icons.search),
                     ),
                   ),
                   const SizedBox(height: 8),
@@ -1575,8 +1628,69 @@ Future<int?> _pickDocumentType(
       },
     ),
   );
-  search.dispose();
-  return result;
+}
+
+Future<void> _shareImageFile({
+  required List<int> bytes,
+  required String fileName,
+  String? mimeType,
+  String? text,
+}) async {
+  if (bytes.isEmpty) throw StateError('Picture data is empty.');
+  final temp = await getTemporaryDirectory();
+  final shareDir = Directory(p.join(temp.path, 'secure_docs_share'));
+  await shareDir.create(recursive: true);
+  var safeName = _safeFileName(
+    fileName,
+    fallback: 'secure-doc-picture-${DateTime.now().millisecondsSinceEpoch}.jpg',
+  );
+  if (p.extension(safeName).isEmpty) {
+    safeName = '$safeName${_extensionForMime(mimeType)}';
+  }
+  final file = File(p.join(shareDir.path, safeName));
+  await file.writeAsBytes(bytes, flush: true);
+  await Share.shareXFiles(
+    [XFile(file.path, mimeType: mimeType ?? 'image/jpeg')],
+    text: text,
+    subject: 'Secure Docs picture',
+  );
+}
+
+Future<File> _copyFileForSharing(File source, {required String preferredName}) async {
+  if (!await source.exists()) throw StateError('File does not exist.');
+  final temp = await getTemporaryDirectory();
+  final shareDir = Directory(p.join(temp.path, 'secure_docs_share'));
+  await shareDir.create(recursive: true);
+  final target = File(p.join(
+    shareDir.path,
+    _safeFileName(preferredName, fallback: 'secure-doc-backup.sdbak'),
+  ));
+  await source.copy(target.path);
+  return target;
+}
+
+
+String _extensionForMime(String? mimeType) {
+  switch (mimeType?.toLowerCase()) {
+    case 'image/png':
+      return '.png';
+    case 'image/webp':
+      return '.webp';
+    case 'image/heic':
+    case 'image/heif':
+      return '.heic';
+    case 'image/jpeg':
+    case 'image/jpg':
+    default:
+      return '.jpg';
+  }
+}
+
+String _safeFileName(String input, {required String fallback}) {
+  final trimmed = input.trim();
+  if (trimmed.isEmpty) return fallback;
+  final cleaned = trimmed.replaceAll(RegExp(r'[^A-Za-z0-9._-]'), '_');
+  return cleaned.isEmpty ? fallback : cleaned;
 }
 
 class LocalBiometricPrompt {

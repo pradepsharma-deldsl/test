@@ -1,39 +1,28 @@
-# Secure Docs / My Organizer V2.5
+# Secure Manager / Document Vault V2.6
 
-## Modules
-- **Document Vault** — encrypted local document storage, 1–5 images per new document, searchable categories, picture sharing, encrypted backup/restore.
-- **Event Management** — module entry point is present; scheduling functionality is intentionally reserved for the next development step.
+Android-first, offline encrypted Document Vault source. The main page contains Document Vault and the Event Management entry point. Event Management is intentionally still a shell for the next development module.
 
-## Updated behavior
-- A new document still requires at least 1 picture and allows up to 5.
-- If the last remaining picture of an existing document is deleted, the **entire document record is deleted** in the same database transaction.
-- Stored pictures can be shared through Android Share (WhatsApp, Gmail, Messages, etc., depending on installed apps).
-- Encrypted `.sdbak` backups open Android Share so they can be saved/sent to Gmail, Google Drive, OneDrive, Dropbox, Files, or other installed providers. No Google/Drive credentials are stored by this app.
+## V2.6 repairs
 
-# Secure Docs Mobile — repaired build
-
-Android-focused offline secure document vault.
-
-Key rules/features:
-- 1 to 5 pictures per document
-- Encrypted SQLCipher SQLite database
-- Pictures stored as encrypted database BLOBs
-- Add/edit/delete document types with search
-- Document search/filter
-- Camera/gallery import with handled errors
-- PIN/password and biometric unlock
-- Power saver
-- Encrypted backup/restore
+- Fixed fragile tab/category refresh lifecycle that could trigger Flutter framework assertion screens when saving under document types other than the default type.
+- Custom/new document types are reloaded without destroying active tab state.
+- Picture sharing now creates a real temporary image file before opening Android Share (WhatsApp/Gmail/etc.).
+- Encrypted backup is copied to temporary/cache storage before Android Share so Gmail/Drive/File apps can consume it.
+- Restore now uses the Android document picker without .sdbak-only filtering and can import provider streams from cloud/file providers.
+- Minimum 1 picture, maximum 5 pictures when creating a document.
+- Deleting the last remaining picture deletes the complete document record.
 
 ## GitHub build
-Upload the CONTENTS of this project to the repository root so GitHub shows `android/`, `lib/`, `pubspec.yaml`, and `.github/` at top level.
 
-Then run **Actions -> Build Android APK -> Run workflow**.
+Repository root must contain `pubspec.yaml`, `lib/`, `android/`, `test/`, and `.github/workflows/build-apk.yml`.
 
-The workflow runs:
+Run **Actions -> Build Android APK -> Run workflow**. The workflow executes:
+
 1. `flutter pub get`
 2. `flutter analyze`
 3. `flutter test`
 4. `flutter build apk --debug`
 
-The APK artifact is named `secure-docs-debug-apk`.
+On success download the `secure-docs-debug-apk` artifact.
+
+See `VALIDATION_V2.6.md` for validation scope and runtime limitations.

@@ -1,7 +1,7 @@
 name: secure_doc_mobile
 publish_to: 'none'
 description: Fully offline secure document manager with encrypted SQLite BLOB storage.
-version: 2.5.0+5
+version: 2.7.0+7
 
 environment:
   sdk: '>=3.4.0 <4.0.0'
